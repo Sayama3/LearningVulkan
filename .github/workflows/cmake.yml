@@ -15,7 +15,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         compiler: [llvm, gcc]
         include:
           - os: windows-latest
@@ -48,14 +48,9 @@ jobs:
       if: ${{ contains(matrix.os, 'ubuntu') }}
       run: sudo apt-get install -y libwayland-dev libxkbcommon-dev xorg-dev
 
-    - name: Install OpenGL on Ubuntu
+    - name: Install Graphics Libraries on Ubuntu
       if: ${{ contains(matrix.os, 'ubuntu') }}
       run: sudo apt-get install -y libgl1 libglx-mesa0 freeglut3-dev
-
-# Setup macos
-    - name: Install OpenGL on MacOS
-      if: ${{ contains(matrix.os, 'macos') }}
-      run: brew install glew
 
     - name: Setup Cpp
       uses: aminya/setup-cpp@v1
