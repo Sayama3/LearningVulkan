@@ -1,0 +1,84 @@
+name: Build Cmake Project
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        compiler: [llvm, gcc]
+        include:
+          - os: windows-latest
+            compiler: msvc
+      fail-fast: false
+
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: ${{ matrix.os }}
+
+    steps:
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install Vulkan SDK
+      uses: humbletim/install-vulkan-sdk@v1.1.1
+      with:
+        version: 1.4.304.1
+        cache: true
+
+      # Setup ubuntu
+    - name: Fetch all apt libraries
+      if: ${{ contains(matrix.os, 'ubuntu') }}
+      run: sudo apt-get update
+
+    - name: Install X11 dependencies on Unix-like system
+      if: ${{ contains(matrix.os, 'ubuntu') }}
+      run: sudo apt-get install -y libwayland-dev libxkbcommon-dev xorg-dev
+
+    - name: Install OpenGL on Ubuntu
+      if: ${{ contains(matrix.os, 'ubuntu') }}
+      run: sudo apt-get install -y libgl1 libglx-mesa0 freeglut3-dev
+
+# Setup macos
+    - name: Install OpenGL on MacOS
+      if: ${{ contains(matrix.os, 'macos') }}
+      run: brew install glew
+
+    - name: Setup Cpp
+      uses: aminya/setup-cpp@v1
+      with:
+        compiler: ${{ matrix.compiler }}
+        vcvarsall: ${{ contains(matrix.os, 'windows') }}
+        cmake: true
+        ninja: true
+        vcpkg: false
+        cppcheck: false
+        clangtidy: false # instead of `true`, which chooses the default version, you can pass a specific version.
+
+    - name: Configure CMake
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      run: ctest -C ${{env.BUILD_TYPE}}
