@@ -232,6 +232,13 @@ private:
 		createInfo.oldSwapchain = VK_NULL_HANDLE; // If we need to recreate a swapchain cause the window was resize.
 
 		TRY_VK_MSG(vkCreateSwapchainKHR(m_Device, &createInfo, nullptr, &m_SwapChain), "failed to create swap chain!");
+
+		vkGetSwapchainImagesKHR(m_Device, m_SwapChain, &imageCount, nullptr);
+		m_SwapChainImages.resize(imageCount);
+		vkGetSwapchainImagesKHR(m_Device, m_SwapChain, &imageCount, m_SwapChainImages.data());
+
+		m_SwapChainImageFormat = surfaceFormat.format;
+		m_SwapChainExtent = extent;
 	}
 
 	void mainLoop() {
@@ -571,6 +578,9 @@ private:
 	VkSurfaceKHR m_Surface{VK_NULL_HANDLE};
 	VkSwapchainKHR m_SwapChain{VK_NULL_HANDLE};
 	VkDebugUtilsMessengerEXT debugMessenger{VK_NULL_HANDLE};
+	VkFormat m_SwapChainImageFormat{};
+	VkExtent2D m_SwapChainExtent{};
+	std::vector<VkImage> m_SwapChainImages;
 };
 
 int main() {
