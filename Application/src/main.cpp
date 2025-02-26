@@ -539,13 +539,23 @@ private:
 		TRY_VK_MSG(CreateDebugUtilsMessengerEXT(m_Instance, &createInfo, nullptr, &debugMessenger), "failed to set up debug messenger!")
 	}
 
+	static std::string severityToString(const VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity) {
+        if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {return "ERROR"; }
+        if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {return "WARNING"; }
+        if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {return "INFO"; }
+        if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {return "VERBOSE"; }
+		return"Unknown";
+	}
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 			VkDebugUtilsMessageTypeFlagsEXT messageType,
 			const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
 			void *pUserData) {
-		if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-			std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+		if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+			std::cerr << "[" << severityToString(messageSeverity) << "] [VULKAN] " << pCallbackData->pMessage << std::endl;
+		}
+		else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+			std::cout << "[" << severityToString(messageSeverity) << "] [VULKAN] " << pCallbackData->pMessage << std::endl;
 		}
 		return VK_FALSE;
 	}
