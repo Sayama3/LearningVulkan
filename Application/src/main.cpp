@@ -147,6 +147,7 @@ private:
 		createImageViews();
 		createRenderPass();
 		createGraphicsPipeline();
+		createFramebuffers();
 	}
 
 	void pickPhysicalDevice() {
@@ -505,6 +506,26 @@ private:
 		vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
 	}
 
+	void createFramebuffers() {
+		m_SwapChainFramebuffers.resize(m_SwapChainImageViews.size());
+
+		for (int i = 0; i < m_SwapChainImageViews.size(); ++i) {
+			VkImageView attachments[] = {
+				m_SwapChainImageViews[i]
+			};
+
+			VkFramebufferCreateInfo framebufferInfo{};
+			framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+			framebufferInfo.renderPass = m_RenderPass;
+			framebufferInfo.attachmentCount = 1;
+			framebufferInfo.pAttachments = attachments;
+			framebufferInfo.width = m_SwapChainExtent.width;
+			framebufferInfo.height = m_SwapChainExtent.height;
+			framebufferInfo.layers = 1;
+
+			TRY_VK(vkCreateFramebuffer(m_Device, &framebufferInfo, nullptr, &m_SwapChainFramebuffers[i]));
+		}
+	}
 
 	void mainLoop() {
 		while (!glfwWindowShouldClose(m_Window)) {
@@ -513,6 +534,9 @@ private:
 	}
 
 	void cleanup() {
+		for (auto framebuffer : m_SwapChainFramebuffers) {
+			vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+		}
 		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
 		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
