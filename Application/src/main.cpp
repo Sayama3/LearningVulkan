@@ -150,6 +150,7 @@ private:
 		createFramebuffers();
 		createCommandPool();
 		createCommandBuffer();
+		createSyncObjects();
 	}
 
 	void pickPhysicalDevice() {
@@ -326,12 +327,24 @@ private:
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
 
+		VkSubpassDependency dependency{};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
 		VkRenderPassCreateInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 		renderPassInfo.attachmentCount = 1;
 		renderPassInfo.pAttachments = &colorAttachment;
 		renderPassInfo.subpassCount = 1;
 		renderPassInfo.pSubpasses = &subpass;
+
+		// Add dependency of the render pass to the SwapChain read color stage.
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies = &dependency;
 
 		TRY_VK(vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_RenderPass))
 	}
@@ -550,14 +563,37 @@ private:
 		TRY_VK(vkAllocateCommandBuffers(m_Device, &allocInfo, &m_CommandBuffer));
 	}
 
+	void createSyncObjects() {
+		VkSemaphoreCreateInfo semaphoreInfo{};
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		semaphoreInfo.pNext = VK_NULL_HANDLE; // Do nothing I think?
+		semaphoreInfo.flags = 0; // Do nothing I think?
+
+		VkFenceCreateInfo fenceInfo{};
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fenceInfo.pNext = VK_NULL_HANDLE;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+
+		TRY_VK(vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &imageAvailableSemaphore));
+		TRY_VK(vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &renderFinishedSemaphore));
+		TRY_VK(vkCreateFence(m_Device, &fenceInfo, nullptr, &inFlightFence));
+	}
+
 	void mainLoop() {
 		while (!glfwWindowShouldClose(m_Window)) {
 			glfwPollEvents();
 			drawFrame();
 		}
+
+		vkDeviceWaitIdle(m_Device);
 	}
 
 	void cleanup() {
+		vkDestroySemaphore(m_Device, imageAvailableSemaphore, nullptr);
+		vkDestroySemaphore(m_Device, renderFinishedSemaphore, nullptr);
+		vkDestroyFence(m_Device, inFlightFence, nullptr);
+
 		// Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
 		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
 		for (auto framebuffer : m_SwapChainFramebuffers) {
@@ -590,7 +626,48 @@ private:
 		*  - Present the swap chain image
 		 */
 		// Synchronisation in Vulkan is **EXPLICIT** !!!
+		vkWaitForFences(m_Device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+		vkResetFences(m_Device, 1, &inFlightFence); // Fence need manual reset.
 
+		uint32_t imageIndex;
+		vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex); // Error might not mean program termination
+		//Recording the command buffer while aquiring the next image in the swapchains
+		TRY_VK(vkResetCommandBuffer(m_CommandBuffer, 0));
+		recordCommandBuffer(m_CommandBuffer, imageIndex);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+		VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+		VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+		submitInfo.waitSemaphoreCount = 1;
+		submitInfo.pWaitSemaphores = waitSemaphores;
+		submitInfo.pWaitDstStageMask = waitStages;
+
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &m_CommandBuffer;
+
+		VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = signalSemaphores;
+
+		TRY_VK(vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, inFlightFence));
+
+		VkSwapchainKHR swapChains[] = {m_SwapChain};
+
+		VkPresentInfoKHR presentInfo{};
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = signalSemaphores;
+
+		presentInfo.swapchainCount = 1;
+		presentInfo.pSwapchains = swapChains;
+		presentInfo.pImageIndices = &imageIndex;
+
+		presentInfo.pResults = nullptr; // Optional
+
+		vkQueuePresentKHR(m_PresentQueue, &presentInfo); // Error might not mean program termination
 	}
 private:
 	int rateDeviceSuitability(const VkPhysicalDevice device) {
@@ -966,6 +1043,11 @@ private:
 	VkPipeline m_GraphicsPipeline{VK_NULL_HANDLE};
 	VkCommandPool m_CommandPool{VK_NULL_HANDLE};
 	VkCommandBuffer m_CommandBuffer{VK_NULL_HANDLE};
+
+	// Synchronisation Objects
+	VkSemaphore imageAvailableSemaphore{VK_NULL_HANDLE};
+	VkSemaphore renderFinishedSemaphore{VK_NULL_HANDLE};
+	VkFence inFlightFence{VK_NULL_HANDLE};
 };
 
 int main() {
