@@ -15,6 +15,9 @@ target_link_libraries(Application PUBLIC
 	TracyClient
 )
 
+# Might have to do something with that
+#message(FATAL_ERROR "$ENV{VULKAN_SDK}/Bin/glslc")
+
 if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
 	file(CREATE_LINK ${CMAKE_SOURCE_DIR}/Shaders/ ${CMAKE_CURRENT_BINARY_DIR}/Shaders/ RESULT copy_result COPY_ON_ERROR SYMBOLIC)
 	if(NOT (copy_result EQUAL 0))
