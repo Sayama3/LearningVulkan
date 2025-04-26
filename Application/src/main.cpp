@@ -374,44 +374,44 @@ private:
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-		// ----- Static Viewport & Scissor at compile time.
-		// Viewport covering the entire window (as define in the swapchains at least)
-		VkViewport viewport{};
-		viewport.x = 0.0f;
-		viewport.y = 0.0f;
-		viewport.width = (float) m_SwapChainExtent.width;
-		viewport.height = (float) m_SwapChainExtent.height;
-		viewport.minDepth = 0.0f;
-		viewport.maxDepth = 1.0f;
-
-		// Scissor covering the entire viewport.
-		VkRect2D scissor{};
-		scissor.offset = {0, 0};
-		scissor.extent = m_SwapChainExtent;
-
-		VkPipelineViewportStateCreateInfo viewportState{};
-		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		viewportState.viewportCount = 1;
-		viewportState.pViewports = &viewport;
-		viewportState.scissorCount = 1;
-		viewportState.pScissors = &scissor;
-
-		// // ----- Dynamic states for say changing the viewport size and scissor without recompiling everything.
-		// std::vector<VkDynamicState> dynamicStates = {
-		// 	VK_DYNAMIC_STATE_VIEWPORT,
-		// 	VK_DYNAMIC_STATE_SCISSOR
-		// };
+		// // ----- Static Viewport & Scissor at compile time.
+		// // Viewport covering the entire window (as define in the swapchains at least)
+		// VkViewport viewport{};
+		// viewport.x = 0.0f;
+		// viewport.y = 0.0f;
+		// viewport.width = (float) m_SwapChainExtent.width;
+		// viewport.height = (float) m_SwapChainExtent.height;
+		// viewport.minDepth = 0.0f;
+		// viewport.maxDepth = 1.0f;
 		//
-		// VkPipelineDynamicStateCreateInfo dynamicState{};
-		// dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		// dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-		// dynamicState.pDynamicStates = dynamicStates.data();
+		// // Scissor covering the entire viewport.
+		// VkRect2D scissor{};
+		// scissor.offset = {0, 0};
+		// scissor.extent = m_SwapChainExtent;
 		//
-		// //  only need to specify their count at pipeline creation time:
 		// VkPipelineViewportStateCreateInfo viewportState{};
 		// viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		// viewportState.viewportCount = 1;
+		// viewportState.pViewports = &viewport;
 		// viewportState.scissorCount = 1;
+		// viewportState.pScissors = &scissor;
+
+		// ----- Dynamic states for say changing the viewport size and scissor without recompiling everything.
+		std::vector<VkDynamicState> dynamicStates = {
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR
+		};
+
+		VkPipelineDynamicStateCreateInfo dynamicState{};
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+		dynamicState.pDynamicStates = dynamicStates.data();
+
+		//  only need to specify their count at pipeline creation time:
+		VkPipelineViewportStateCreateInfo viewportState{};
+		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.scissorCount = 1;
 
 		// ----- Setting up the parameters of the rasterizer.
 
@@ -455,17 +455,17 @@ private:
 		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
 		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
 
-		// // ----- The Per Framebuffer color blending.
-		// VkPipelineColorBlendStateCreateInfo colorBlending{};
-		// colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		// colorBlending.logicOpEnable = VK_FALSE;
-		// colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
-		// colorBlending.attachmentCount = 1;
-		// colorBlending.pAttachments = &colorBlendAttachment;
-		// colorBlending.blendConstants[0] = 0.0f; // Optional
-		// colorBlending.blendConstants[1] = 0.0f; // Optional
-		// colorBlending.blendConstants[2] = 0.0f; // Optional
-		// colorBlending.blendConstants[3] = 0.0f; // Optional
+		// ----- The Per Framebuffer color blending.
+		VkPipelineColorBlendStateCreateInfo colorBlending{};
+		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlending.logicOpEnable = VK_FALSE;
+		colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
+		colorBlending.attachmentCount = 1;
+		colorBlending.pAttachments = &colorBlendAttachment;
+		colorBlending.blendConstants[0] = 0.0f; // Optional
+		colorBlending.blendConstants[1] = 0.0f; // Optional
+		colorBlending.blendConstants[2] = 0.0f; // Optional
+		colorBlending.blendConstants[3] = 0.0f; // Optional
 
 		// ----- Create the Pipeline Layout. Used to specify the uniform and other runtime-editable variables.
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
@@ -475,6 +475,30 @@ private:
 		pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
 		pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 		TRY_VK(vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout));
+
+		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = shaderStages;
+
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = nullptr; // Optional
+		pipelineInfo.pColorBlendState = &colorBlending;
+		pipelineInfo.pDynamicState = &dynamicState;
+
+		pipelineInfo.layout = m_PipelineLayout;
+
+		pipelineInfo.renderPass = m_RenderPass;
+		pipelineInfo.subpass = 0;
+
+		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+		pipelineInfo.basePipelineIndex = -1; // Optional
+
+		TRY_VK(vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline))
 
 		// ----- CLeanup of the bytecode wrapper.
 		vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
@@ -489,6 +513,7 @@ private:
 	}
 
 	void cleanup() {
+		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
 		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
 		for (auto imageView : m_SwapChainImageViews) {
@@ -831,6 +856,7 @@ private:
 	std::vector<VkFramebuffer> m_SwapChainFramebuffers;
 	VkRenderPass m_RenderPass;
 	VkPipelineLayout m_PipelineLayout;
+	VkPipeline m_GraphicsPipeline;
 };
 
 int main() {
