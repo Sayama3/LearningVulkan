@@ -148,6 +148,8 @@ private:
 		createRenderPass();
 		createGraphicsPipeline();
 		createFramebuffers();
+		createCommandPool();
+		createCommandBuffer();
 	}
 
 	void pickPhysicalDevice() {
@@ -527,13 +529,37 @@ private:
 		}
 	}
 
+	void createCommandPool() {
+		QueueFamilyIndices queueFamilyIndices = findQueueFamilies(m_PhysicalDevice);
+
+		VkCommandPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+		TRY_VK(vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool));
+	}
+
+	void createCommandBuffer() {
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.commandPool = m_CommandPool;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandBufferCount = 1;
+
+		TRY_VK(vkAllocateCommandBuffers(m_Device, &allocInfo, &m_CommandBuffer));
+	}
+
 	void mainLoop() {
 		while (!glfwWindowShouldClose(m_Window)) {
 			glfwPollEvents();
+			drawFrame();
 		}
 	}
 
 	void cleanup() {
+		// Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
+		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
 		for (auto framebuffer : m_SwapChainFramebuffers) {
 			vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
 		}
@@ -555,7 +581,18 @@ private:
 	}
 
 private:
+	void drawFrame() {
+		/* At a high level, rendering a frame in Vulkan consists of a common set of steps:
+		*  - Wait for the previous frame to finish
+		*  - Acquire an image from the swap chain
+		*  - Record a command buffer which draws the scene onto that image
+		*  - Submit the recorded command buffer
+		*  - Present the swap chain image
+		 */
+		// Synchronisation in Vulkan is **EXPLICIT** !!!
 
+	}
+private:
 	int rateDeviceSuitability(const VkPhysicalDevice device) {
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
@@ -824,6 +861,7 @@ private:
 		return requiredExtensions.empty();
 	}
 
+private: // Debuging
 	void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
 		createInfo = {};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -861,8 +899,53 @@ private:
 		}
 		return VK_FALSE;
 	}
-
 public:
+private:
+	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = 0; // Optional
+		beginInfo.pInheritanceInfo = nullptr; // Optional
+
+		TRY_VK(vkBeginCommandBuffer(m_CommandBuffer, &beginInfo));
+
+		VkRenderPassBeginInfo renderPassInfo{};
+		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassInfo.renderPass = m_RenderPass;
+		renderPassInfo.framebuffer = m_SwapChainFramebuffers.at(imageIndex);
+
+		renderPassInfo.renderArea.offset = {0, 0};
+		renderPassInfo.renderArea.extent = m_SwapChainExtent;
+
+		VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+		renderPassInfo.clearValueCount = 1;
+		renderPassInfo.pClearValues = &clearColor;
+
+		// No error handling until the end of the command recording.
+		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
+
+		// As it's a dynamic viewport and scissor, we need to register them in the command buffer.
+		VkViewport viewport{};
+		viewport.x = 0.0f;
+		viewport.y = 0.0f;
+		viewport.width = static_cast<float>(m_SwapChainExtent.width);
+		viewport.height = static_cast<float>(m_SwapChainExtent.height);
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+		VkRect2D scissor{};
+		scissor.offset = {0, 0};
+		scissor.extent = m_SwapChainExtent;
+		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+		// Drawing the triangle.
+		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+		vkCmdEndRenderPass(commandBuffer);
+		TRY_VK(vkEndCommandBuffer(commandBuffer));
+	}
 private:
 	GLFWwindow* m_Window{nullptr};
 	VkInstance m_Instance{VK_NULL_HANDLE};
@@ -878,9 +961,11 @@ private:
 	std::vector<VkImage> m_SwapChainImages;
 	std::vector<VkImageView> m_SwapChainImageViews;
 	std::vector<VkFramebuffer> m_SwapChainFramebuffers;
-	VkRenderPass m_RenderPass;
-	VkPipelineLayout m_PipelineLayout;
-	VkPipeline m_GraphicsPipeline;
+	VkRenderPass m_RenderPass{VK_NULL_HANDLE};
+	VkPipelineLayout m_PipelineLayout{VK_NULL_HANDLE};
+	VkPipeline m_GraphicsPipeline{VK_NULL_HANDLE};
+	VkCommandPool m_CommandPool{VK_NULL_HANDLE};
+	VkCommandBuffer m_CommandBuffer{VK_NULL_HANDLE};
 };
 
 int main() {
