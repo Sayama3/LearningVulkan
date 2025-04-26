@@ -54,7 +54,7 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(GLFW glm ImGui Spdlog Tracy)
-find_package(Vulkan REQUIRED COMPONENTS SPIRV-Tools glslc glslang shaderc_combined)
+find_package(Vulkan REQUIRED)
 
 # Need to say to imgui where is glfw & Vulkan Headers
 target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)

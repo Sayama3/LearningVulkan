@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-find_package(Vulkan REQUIRED COMPONENTS SPIRV-Tools glslc glslang shaderc_combined)
+find_package(Vulkan REQUIRED)
 
 add_executable(Application
     src/main.cpp
