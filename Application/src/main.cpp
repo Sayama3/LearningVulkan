@@ -82,9 +82,14 @@ struct Vertex {
 
 
 const std::vector<Vertex> c_Vertices = {
-	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> c_Indices = {
+	0, 1, 2, 2, 3, 0
 };
 
 static std::vector<char> readFile(const std::filesystem::path& filename) {
@@ -197,6 +202,7 @@ private:
 		createFramebuffers();
 		createCommandPool();
 		createVertexBuffer();
+		createIndexBuffer();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -635,6 +641,39 @@ private:
 		vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
 		vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
 	}
+	void createIndexBuffer() {
+		/* It should be noted that in a real world application,
+		 * you're not supposed to actually call vkAllocateMemory for every individual buffer.
+		 * The maximum number of simultaneous memory allocations is limited by the maxMemoryAllocationCount physical device limit,
+		 * which may be as low as 4096 even on high end hardware like an NVIDIA GTX 1080.
+		 * The right way to allocate memory for a large number of objects at the same time is to create a custom allocator
+		 * that splits up a single allocation among many different objects by using the offset parameters that we've seen in many functions.
+		 * You can either implement such an allocator yourself, or use the [VulkanMemoryAllocator library](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) provided by the GPUOpen initiative.
+		 * However, for this tutorial, it's okay to use a separate allocation for every resource, because we won't come close to hitting any of these limits for now.
+		 */
+		const VkDeviceSize bufferSize = sizeof(uint16_t) * c_Indices.size();
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+
+		// Create the vertex buffer and its memory emplacement.
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+		// Filling the memory with the vertices data
+		//  (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ensure the data will be visible by vulkan instantly).
+		void* data{nullptr}; // some pointer
+		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); // Binding the variable to the CPU memory vulkan can read
+		memcpy(data, c_Indices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
+		vkUnmapMemory(m_Device, stagingBufferMemory); // Unmap the variable. Technically will map to nowhere.
+		data = nullptr; // Just my little security to avoid segfault.
+
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_IndexBuffer, m_IndexBufferMemory);
+
+		copyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
+
+		vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+		vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+	}
 
 	void createCommandBuffers() {
 		m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -681,6 +720,9 @@ private:
 
 	void cleanup() {
 		cleanupSwapChain();
+
+		vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
+		vkFreeMemory(m_Device, m_IndexBufferMemory, nullptr);
 
 		vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
 		vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr); // Free memory after the object occupying is freed.
@@ -1240,9 +1282,11 @@ private:
 		VkBuffer vertexBuffers[] = {m_VertexBuffer};
 		VkDeviceSize offsets[] = {0};
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(commandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
 		// Drawing the vertices.
-		vkCmdDraw(commandBuffer, static_cast<uint32_t>(c_Vertices.size()), 1, 0, 0);
+		// vkCmdDraw(commandBuffer, static_cast<uint32_t>(c_Vertices.size()), 1, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(c_Indices.size()), 1, 0, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
 		TRY_VK(vkEndCommandBuffer(commandBuffer));
@@ -1269,6 +1313,8 @@ private:
 
 	VkBuffer m_VertexBuffer;
 	VkDeviceMemory m_VertexBufferMemory;
+	VkBuffer m_IndexBuffer;
+	VkDeviceMemory m_IndexBufferMemory;
 
 	// The following objects are vector with an indice for each frame they represents.
 	std::vector<VkCommandBuffer> m_CommandBuffers{};
