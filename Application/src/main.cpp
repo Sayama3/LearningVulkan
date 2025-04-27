@@ -1,7 +1,10 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
+#include <glm/glm.hpp>
+
 #include <algorithm> // Necessary for std::clamp
+#include <array>
 #include <cstdint> // Necessary for uint32_t
 #include <cstdlib>
 #include <cstring>
@@ -47,6 +50,42 @@ static constexpr bool c_EnableValidationLayers = false;
 #else
 static constexpr bool c_EnableValidationLayers = true;
 #endif
+
+struct Vertex {
+	glm::vec2 pos;
+	glm::vec3 color;
+
+	static VkVertexInputBindingDescription getBindingDescription() {
+		VkVertexInputBindingDescription bindingDescription{};
+		bindingDescription.binding = 0;
+		bindingDescription.stride = sizeof(Vertex);
+		bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		return bindingDescription;
+	}
+
+	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+		attributeDescriptions[0].binding = 0;
+		attributeDescriptions[0].location = 0;
+		attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+		attributeDescriptions[1].binding = 0;
+		attributeDescriptions[1].location = 1;
+		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+		return attributeDescriptions;
+	}
+};
+
+
+const std::vector<Vertex> c_Vertices = {
+	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
 
 static std::vector<char> readFile(const std::filesystem::path& filename) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -157,6 +196,7 @@ private:
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
+		createVertexBuffer();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -385,12 +425,14 @@ private:
 
 		VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
+		auto bindingDescription = Vertex::getBindingDescription();
+		auto attributeDescriptions = Vertex::getAttributeDescriptions();
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vertexInputInfo.vertexBindingDescriptionCount = 0;
-		vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
-		vertexInputInfo.vertexAttributeDescriptionCount = 0;
-		vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+		vertexInputInfo.vertexBindingDescriptionCount = 1;
+		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -560,6 +602,40 @@ private:
 		TRY_VK(vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool));
 	}
 
+	void createVertexBuffer() {
+
+		// Creating the vertex buffer
+		VkBufferCreateInfo bufferInfo{};
+		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferInfo.size = sizeof(Vertex) * c_Vertices.size();
+		bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		bufferInfo.flags = 0;
+		TRY_VK(vkCreateBuffer(m_Device, &bufferInfo, nullptr, &m_VertexBuffer))
+
+		// Allocating the memory required by the vertex buffer
+		VkMemoryRequirements memRequirements;
+		vkGetBufferMemoryRequirements(m_Device, m_VertexBuffer, &memRequirements);
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		TRY_VK(vkAllocateMemory(m_Device, &allocInfo, nullptr, &m_VertexBufferMemory));
+
+		// Binding said memory to the vertex buffer object.
+		vkBindBufferMemory(m_Device, m_VertexBuffer, m_VertexBufferMemory, 0);
+
+		// Filling the memory with the vertices data
+		//  (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ensure the data will be visible by vulkan instantly).
+		void* data{nullptr}; // some pointer
+		vkMapMemory(m_Device, m_VertexBufferMemory, 0, bufferInfo.size, 0, &data); // Binding the variable to the CPU memory vulkan can read
+		memcpy(data, c_Vertices.data(), (size_t) bufferInfo.size); // Copy the data for vulkan to use
+		vkUnmapMemory(m_Device, m_VertexBufferMemory); // Unmap the variable. Technically will map to nowhere.
+		data = nullptr; // Just my little security to avoid segfault.
+
+
+	}
+
 	void createCommandBuffers() {
 		m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
@@ -605,6 +681,9 @@ private:
 
 	void cleanup() {
 		cleanupSwapChain();
+
+		vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
+		vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr); // Free memory after the object occupying is freed.
 
 		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
@@ -736,6 +815,20 @@ private:
 		m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 private:
+
+	uint32_t findMemoryType(const uint32_t typeFilter, const VkMemoryPropertyFlags properties) {
+		VkPhysicalDeviceMemoryProperties memProperties;
+		vkGetPhysicalDeviceMemoryProperties(m_PhysicalDevice, &memProperties);
+
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+			if ((typeFilter & (1 << i))  && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+				return i;
+			}
+		}
+
+		throw std::runtime_error("failed to find suitable memory type!");
+	}
+
 	int rateDeviceSuitability(VkPhysicalDevice device) {
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
@@ -1083,8 +1176,13 @@ private:
 		scissor.extent = m_SwapChainExtent;
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-		// Drawing the triangle.
-		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+		// Binding the Vertex Buffer to draw from it.
+		VkBuffer vertexBuffers[] = {m_VertexBuffer};
+		VkDeviceSize offsets[] = {0};
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+		// Drawing the vertices.
+		vkCmdDraw(commandBuffer, static_cast<uint32_t>(c_Vertices.size()), 1, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
 		TRY_VK(vkEndCommandBuffer(commandBuffer));
@@ -1108,6 +1206,9 @@ private:
 	VkPipelineLayout m_PipelineLayout{VK_NULL_HANDLE};
 	VkPipeline m_GraphicsPipeline{VK_NULL_HANDLE};
 	VkCommandPool m_CommandPool{VK_NULL_HANDLE};
+
+	VkBuffer m_VertexBuffer;
+	VkDeviceMemory m_VertexBufferMemory;
 
 	// The following objects are vector with an indice for each frame they represents.
 	std::vector<VkCommandBuffer> m_CommandBuffers{};
