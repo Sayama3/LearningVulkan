@@ -598,6 +598,13 @@ private:
 	}
 
 	void cleanup() {
+		cleanupSwapChain();
+
+		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
+		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
+
+		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+
 		for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
 			vkDestroySemaphore(m_Device, imageAvailableSemaphores[i], nullptr);
 			vkDestroySemaphore(m_Device, renderFinishedSemaphores[i], nullptr);
@@ -606,27 +613,43 @@ private:
 
 		// Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
 		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
-		for (auto framebuffer : m_SwapChainFramebuffers) {
-			vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
-		}
-		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
-		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
-		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
-		for (auto imageView : m_SwapChainImageViews) {
-			vkDestroyImageView(m_Device, imageView, nullptr);
-		}
-		vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
-		vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr);
+
 		vkDestroyDevice(m_Device, nullptr);
+
 		if constexpr (c_EnableValidationLayers) {
 			DestroyDebugUtilsMessengerEXT(m_Instance, debugMessenger, nullptr);
 		}
+
+		vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr);
 		vkDestroyInstance(m_Instance, nullptr);
+
 		glfwDestroyWindow(m_Window);
+
 		glfwTerminate();
 	}
 
 private:
+	void cleanupSwapChain() {
+		for (auto framebuffer : m_SwapChainFramebuffers) {
+			vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+		}
+		for (auto imageView : m_SwapChainImageViews) {
+			vkDestroyImageView(m_Device, imageView, nullptr);
+		}
+		vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
+	}
+
+	void recreateSwapChain() {
+		// This is a ressources recreation step. Therefore, we wait for all resources to be idle.
+		vkDeviceWaitIdle(m_Device);
+
+		cleanupSwapChain();
+
+		createSwapChain();
+		createImageViews();
+		createFramebuffers();
+	}
+
 	void drawFrame() {
 		/* At a high level, rendering a frame in Vulkan consists of a common set of steps:
 		*  - Wait for the previous frame to finish
