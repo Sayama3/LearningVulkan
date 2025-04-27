@@ -603,17 +603,37 @@ private:
 	}
 
 	void createVertexBuffer() {
+		/* It should be noted that in a real world application,
+		 * you're not supposed to actually call vkAllocateMemory for every individual buffer.
+		 * The maximum number of simultaneous memory allocations is limited by the maxMemoryAllocationCount physical device limit,
+		 * which may be as low as 4096 even on high end hardware like an NVIDIA GTX 1080.
+		 * The right way to allocate memory for a large number of objects at the same time is to create a custom allocator
+		 * that splits up a single allocation among many different objects by using the offset parameters that we've seen in many functions.
+		 * You can either implement such an allocator yourself, or use the [VulkanMemoryAllocator library](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) provided by the GPUOpen initiative.
+		 * However, for this tutorial, it's okay to use a separate allocation for every resource, because we won't come close to hitting any of these limits for now.
+		 */
+		const VkDeviceSize bufferSize = sizeof(Vertex) * c_Vertices.size();
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+
 		// Create the vertex buffer and its memory emplacement.
-		VkDeviceSize bufferSize = sizeof(Vertex) * c_Vertices.size();
-		createBuffer(sizeof(Vertex) * c_Vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexBuffer, m_VertexBufferMemory);
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
 		// Filling the memory with the vertices data
 		//  (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ensure the data will be visible by vulkan instantly).
 		void* data{nullptr}; // some pointer
-		vkMapMemory(m_Device, m_VertexBufferMemory, 0, bufferSize, 0, &data); // Binding the variable to the CPU memory vulkan can read
+		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); // Binding the variable to the CPU memory vulkan can read
 		memcpy(data, c_Vertices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
-		vkUnmapMemory(m_Device, m_VertexBufferMemory); // Unmap the variable. Technically will map to nowhere.
+		vkUnmapMemory(m_Device, stagingBufferMemory); // Unmap the variable. Technically will map to nowhere.
 		data = nullptr; // Just my little security to avoid segfault.
+
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_VertexBuffer, m_VertexBufferMemory);
+
+		copyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
+
+		vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+		vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
 	}
 
 	void createCommandBuffers() {
@@ -816,6 +836,44 @@ private:
 
 		// Binding said memory to the vertex buffer object.
 		vkBindBufferMemory(m_Device, buffer, bufferMemory, 0);
+	}
+
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+
+		// As it's a command, we need a temporary command buffer to allow the transfer.
+		//  Might be doable in a pre-draw dedicated command buffer and a list of those temporary buffer.
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandPool = m_CommandPool;
+		allocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer commandBuffer;
+		vkAllocateCommandBuffers(m_Device, &allocInfo, &commandBuffer);
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // We'll only use the command buffer once for the copy. We tell it to the driver so mayber some opti will be done ?
+
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0; // Optional
+		copyRegion.dstOffset = 0; // Optional
+		copyRegion.size = size;
+		vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+		vkEndCommandBuffer(commandBuffer);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+
+		vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(m_GraphicsQueue);
+
+		vkFreeCommandBuffers(m_Device, m_CommandPool, 1, &commandBuffer);
 	}
 
 	uint32_t findMemoryType(const uint32_t typeFilter, const VkMemoryPropertyFlags properties) {
