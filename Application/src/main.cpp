@@ -603,37 +603,17 @@ private:
 	}
 
 	void createVertexBuffer() {
-
-		// Creating the vertex buffer
-		VkBufferCreateInfo bufferInfo{};
-		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufferInfo.size = sizeof(Vertex) * c_Vertices.size();
-		bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		bufferInfo.flags = 0;
-		TRY_VK(vkCreateBuffer(m_Device, &bufferInfo, nullptr, &m_VertexBuffer))
-
-		// Allocating the memory required by the vertex buffer
-		VkMemoryRequirements memRequirements;
-		vkGetBufferMemoryRequirements(m_Device, m_VertexBuffer, &memRequirements);
-		VkMemoryAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memRequirements.size;
-		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		TRY_VK(vkAllocateMemory(m_Device, &allocInfo, nullptr, &m_VertexBufferMemory));
-
-		// Binding said memory to the vertex buffer object.
-		vkBindBufferMemory(m_Device, m_VertexBuffer, m_VertexBufferMemory, 0);
+		// Create the vertex buffer and its memory emplacement.
+		VkDeviceSize bufferSize = sizeof(Vertex) * c_Vertices.size();
+		createBuffer(sizeof(Vertex) * c_Vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexBuffer, m_VertexBufferMemory);
 
 		// Filling the memory with the vertices data
 		//  (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ensure the data will be visible by vulkan instantly).
 		void* data{nullptr}; // some pointer
-		vkMapMemory(m_Device, m_VertexBufferMemory, 0, bufferInfo.size, 0, &data); // Binding the variable to the CPU memory vulkan can read
-		memcpy(data, c_Vertices.data(), (size_t) bufferInfo.size); // Copy the data for vulkan to use
+		vkMapMemory(m_Device, m_VertexBufferMemory, 0, bufferSize, 0, &data); // Binding the variable to the CPU memory vulkan can read
+		memcpy(data, c_Vertices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
 		vkUnmapMemory(m_Device, m_VertexBufferMemory); // Unmap the variable. Technically will map to nowhere.
 		data = nullptr; // Just my little security to avoid segfault.
-
-
 	}
 
 	void createCommandBuffers() {
@@ -815,6 +795,28 @@ private:
 		m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 private:
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+		// Creating the buffer
+		VkBufferCreateInfo bufferInfo{};
+		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferInfo.size = size;
+		bufferInfo.usage = usage;
+		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // To edit if we want to go through a different queue family specifically for transfer operations
+		bufferInfo.flags = 0;
+		TRY_VK(vkCreateBuffer(m_Device, &bufferInfo, nullptr, &buffer))
+
+		// Allocating the memory required by the buffer
+		VkMemoryRequirements memRequirements;
+		vkGetBufferMemoryRequirements(m_Device, buffer, &memRequirements);
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+		TRY_VK(vkAllocateMemory(m_Device, &allocInfo, nullptr, &bufferMemory));
+
+		// Binding said memory to the vertex buffer object.
+		vkBindBufferMemory(m_Device, buffer, bufferMemory, 0);
+	}
 
 	uint32_t findMemoryType(const uint32_t typeFilter, const VkMemoryPropertyFlags properties) {
 		VkPhysicalDeviceMemoryProperties memProperties;
