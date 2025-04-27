@@ -131,11 +131,18 @@ private: // Helper Function
 		return shaderModule;
 	}
 private:
+	static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+		auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+		app->m_FramebufferResized = true;
+	}
+
 	void initWindow() {
 		glfwInit();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 		m_Window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+		glfwSetWindowUserPointer(m_Window, this);
+		glfwSetFramebufferSizeCallback(m_Window, framebufferResizeCallback);
 	}
 
 	void initVulkan() {
@@ -237,7 +244,6 @@ private:
 		VkSwapchainCreateInfoKHR createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 		createInfo.surface = m_Surface;
-
 		createInfo.minImageCount = imageCount;
 		createInfo.imageFormat = surfaceFormat.format;
 		createInfo.imageColorSpace = surfaceFormat.colorSpace;
@@ -640,6 +646,14 @@ private:
 	}
 
 	void recreateSwapChain() {
+		// Handling minimization
+		int width = 0, height = 0;
+		glfwGetFramebufferSize(m_Window, &width, &height);
+		while (width == 0 || height == 0) {
+			glfwGetFramebufferSize(m_Window, &width, &height);
+			glfwWaitEvents();
+		}
+
 		// This is a ressources recreation step. Therefore, we wait for all resources to be idle.
 		vkDeviceWaitIdle(m_Device);
 
@@ -660,10 +674,20 @@ private:
 		 */
 		// Synchronisation in Vulkan is **EXPLICIT** !!!
 		vkWaitForFences(m_Device, 1, &inFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
-		vkResetFences(m_Device, 1, &inFlightFences[m_CurrentFrame]); // Fence need manual reset.
 
 		uint32_t imageIndex;
-		vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, imageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex); // Error might not mean program termination
+		VkResult result = vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, imageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex); // Error might not mean program termination
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR /*|| result == VK_SUBOPTIMAL_KHR*/) {
+			recreateSwapChain();
+			return;
+		} else {
+			TRY_MSG(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "Failing to acquire the Swap Chain Image.");
+		}
+
+		// Reset fence only if not recreating swap chain to avoid a deadlock in the next frame.
+		vkResetFences(m_Device, 1, &inFlightFences[m_CurrentFrame]); // Fence need manual reset.
+
 		//Recording the command buffer while aquiring the next image in the swapchains
 		TRY_VK(vkResetCommandBuffer(m_CommandBuffers[m_CurrentFrame], 0));
 		recordCommandBuffer(m_CommandBuffers[m_CurrentFrame], imageIndex);
@@ -700,12 +724,19 @@ private:
 
 		presentInfo.pResults = nullptr; // Optional
 
-		vkQueuePresentKHR(m_PresentQueue, &presentInfo); // Error might not mean program termination
+		result = vkQueuePresentKHR(m_PresentQueue, &presentInfo); // Error might not mean program termination
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_FramebufferResized) {
+			m_FramebufferResized = false;
+			recreateSwapChain();
+		} else {
+			TRY_VK_MSG(result, "Failing to acquire the Swap Chain Image.");
+		}
 
 		m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 private:
-	int rateDeviceSuitability(const VkPhysicalDevice device) {
+	int rateDeviceSuitability(VkPhysicalDevice device) {
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
 		vkGetPhysicalDeviceProperties(device, &deviceProperties);
@@ -1086,6 +1117,7 @@ private:
 	std::vector<VkFence> inFlightFences{};
 
 	uint16_t m_CurrentFrame = 0;
+	bool m_FramebufferResized = false;
 };
 
 int main() {
