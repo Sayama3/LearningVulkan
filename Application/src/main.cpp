@@ -1,4 +1,4 @@
-#define GLFW_INCLUDE_VULKAN
+#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
 #include <algorithm> // Necessary for std::clamp
@@ -38,6 +38,7 @@
 
 static constexpr uint32_t WIDTH = 800;
 static constexpr uint32_t HEIGHT = 600;
+static constexpr uint16_t MAX_FRAMES_IN_FLIGHT = 2;
 
 static const std::vector<const char *> c_ValidationLayers = {"VK_LAYER_KHRONOS_validation",};
 static const std::vector<const char*> c_DeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -149,7 +150,7 @@ private:
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
-		createCommandBuffer();
+		createCommandBuffers();
 		createSyncObjects();
 	}
 
@@ -553,14 +554,16 @@ private:
 		TRY_VK(vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool));
 	}
 
-	void createCommandBuffer() {
+	void createCommandBuffers() {
+		m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
 		VkCommandBufferAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		allocInfo.commandPool = m_CommandPool;
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = 1;
+		allocInfo.commandBufferCount = m_CommandBuffers.size();
 
-		TRY_VK(vkAllocateCommandBuffers(m_Device, &allocInfo, &m_CommandBuffer));
+		TRY_VK(vkAllocateCommandBuffers(m_Device, &allocInfo, m_CommandBuffers.data()));
 	}
 
 	void createSyncObjects() {
@@ -574,10 +577,15 @@ private:
 		fenceInfo.pNext = VK_NULL_HANDLE;
 		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
-		TRY_VK(vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &imageAvailableSemaphore));
-		TRY_VK(vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &renderFinishedSemaphore));
-		TRY_VK(vkCreateFence(m_Device, &fenceInfo, nullptr, &inFlightFence));
+		for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+			TRY_VK(vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]));
+			TRY_VK(vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]));
+			TRY_VK(vkCreateFence(m_Device, &fenceInfo, nullptr, &inFlightFences[i]));
+		}
 	}
 
 	void mainLoop() {
@@ -590,9 +598,11 @@ private:
 	}
 
 	void cleanup() {
-		vkDestroySemaphore(m_Device, imageAvailableSemaphore, nullptr);
-		vkDestroySemaphore(m_Device, renderFinishedSemaphore, nullptr);
-		vkDestroyFence(m_Device, inFlightFence, nullptr);
+		for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+			vkDestroySemaphore(m_Device, imageAvailableSemaphores[i], nullptr);
+			vkDestroySemaphore(m_Device, renderFinishedSemaphores[i], nullptr);
+			vkDestroyFence(m_Device, inFlightFences[i], nullptr);
+		}
 
 		// Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
 		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
@@ -626,32 +636,32 @@ private:
 		*  - Present the swap chain image
 		 */
 		// Synchronisation in Vulkan is **EXPLICIT** !!!
-		vkWaitForFences(m_Device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-		vkResetFences(m_Device, 1, &inFlightFence); // Fence need manual reset.
+		vkWaitForFences(m_Device, 1, &inFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX);
+		vkResetFences(m_Device, 1, &inFlightFences[m_CurrentFrame]); // Fence need manual reset.
 
 		uint32_t imageIndex;
-		vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex); // Error might not mean program termination
+		vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX, imageAvailableSemaphores[m_CurrentFrame], VK_NULL_HANDLE, &imageIndex); // Error might not mean program termination
 		//Recording the command buffer while aquiring the next image in the swapchains
-		TRY_VK(vkResetCommandBuffer(m_CommandBuffer, 0));
-		recordCommandBuffer(m_CommandBuffer, imageIndex);
+		TRY_VK(vkResetCommandBuffer(m_CommandBuffers[m_CurrentFrame], 0));
+		recordCommandBuffer(m_CommandBuffers[m_CurrentFrame], imageIndex);
 
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-		VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+		VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[m_CurrentFrame]};
 		VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 		submitInfo.waitSemaphoreCount = 1;
 		submitInfo.pWaitSemaphores = waitSemaphores;
 		submitInfo.pWaitDstStageMask = waitStages;
 
 		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &m_CommandBuffer;
+		submitInfo.pCommandBuffers = &m_CommandBuffers[m_CurrentFrame];
 
-		VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+		VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[m_CurrentFrame]};
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = signalSemaphores;
 
-		TRY_VK(vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, inFlightFence));
+		TRY_VK(vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, inFlightFences[m_CurrentFrame]));
 
 		VkSwapchainKHR swapChains[] = {m_SwapChain};
 
@@ -668,6 +678,8 @@ private:
 		presentInfo.pResults = nullptr; // Optional
 
 		vkQueuePresentKHR(m_PresentQueue, &presentInfo); // Error might not mean program termination
+
+		m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 private:
 	int rateDeviceSuitability(const VkPhysicalDevice device) {
@@ -984,7 +996,7 @@ private:
 		beginInfo.flags = 0; // Optional
 		beginInfo.pInheritanceInfo = nullptr; // Optional
 
-		TRY_VK(vkBeginCommandBuffer(m_CommandBuffer, &beginInfo));
+		TRY_VK(vkBeginCommandBuffer(m_CommandBuffers[m_CurrentFrame], &beginInfo));
 
 		VkRenderPassBeginInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1042,12 +1054,15 @@ private:
 	VkPipelineLayout m_PipelineLayout{VK_NULL_HANDLE};
 	VkPipeline m_GraphicsPipeline{VK_NULL_HANDLE};
 	VkCommandPool m_CommandPool{VK_NULL_HANDLE};
-	VkCommandBuffer m_CommandBuffer{VK_NULL_HANDLE};
 
+	// The following objects are vector with an indice for each frame they represents.
+	std::vector<VkCommandBuffer> m_CommandBuffers{};
 	// Synchronisation Objects
-	VkSemaphore imageAvailableSemaphore{VK_NULL_HANDLE};
-	VkSemaphore renderFinishedSemaphore{VK_NULL_HANDLE};
-	VkFence inFlightFence{VK_NULL_HANDLE};
+	std::vector<VkSemaphore> imageAvailableSemaphores{};
+	std::vector<VkSemaphore> renderFinishedSemaphores{};
+	std::vector<VkFence> inFlightFences{};
+
+	uint16_t m_CurrentFrame = 0;
 };
 
 int main() {
