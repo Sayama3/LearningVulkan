@@ -1,6 +1,9 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 #define GLM_FORCE_RADIANS
 // #define GLM_FORCE_RIGHT_HANDED
 #include <glm/glm.hpp>
@@ -211,6 +214,7 @@ private:
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
+		createTextureImage();
 		createVertexBuffer();
 		createIndexBuffer();
 
@@ -639,6 +643,61 @@ private:
 		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
 
 		TRY_VK(vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool));
+	}
+
+	void createTextureImage() {
+		int texWidth, texHeight, texChannels;
+
+		stbi_uc* pixels = stbi_load("Assets/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+
+		TRY_MSG(texChannels == 4, "The texture loaded wasn't loaded with four channels.");
+		VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+		TRY_MSG(!!pixels, "failed to load texture image!");
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+		void* data;
+		vkMapMemory(m_Device, stagingBufferMemory, 0, imageSize, 0, &data);
+		memcpy(data, pixels, static_cast<size_t>(imageSize));
+		vkUnmapMemory(m_Device, stagingBufferMemory);
+
+		stbi_image_free(pixels);
+
+		// m_TextureImage
+		// m_TextureImageMemory
+
+		VkImageCreateInfo imageInfo{};
+		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		imageInfo.imageType = VK_IMAGE_TYPE_2D;
+		imageInfo.extent.width = static_cast<uint32_t>(texWidth);
+		imageInfo.extent.height = static_cast<uint32_t>(texHeight);
+		imageInfo.extent.depth = 1;
+		imageInfo.mipLevels = 1;
+		imageInfo.arrayLayers = 1;
+
+		imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+
+		/**
+		* VK_IMAGE_TILING_LINEAR: Texels are laid out in row-major order like our pixels array
+		* VK_IMAGE_TILING_OPTIMAL: Texels are laid out in an implementation defined order for optimal access
+		*/
+		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL; // VK_IMAGE_TILING_LINEAR / VK_IMAGE_TILING_OPTIMAL
+
+		/**
+		* VK_IMAGE_LAYOUT_UNDEFINED: Not usable by the GPU and the very first transition will discard the texels.
+		* VK_IMAGE_LAYOUT_PREINITIALIZED: Not usable by the GPU, but the first transition will preserve the texels.
+		*/
+		imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+		imageInfo.flags = 0; // Optional
+
+		TRY_VK(vkCreateImage(m_Device, &imageInfo, nullptr, &m_TextureImage));
+		
 	}
 
 	void createVertexBuffer() {
@@ -1455,6 +1514,9 @@ private:
 	std::vector<VkSemaphore> imageAvailableSemaphores{};
 	std::vector<VkSemaphore> renderFinishedSemaphores{};
 	std::vector<VkFence> inFlightFences{};
+
+	VkImage m_TextureImage;
+	VkDeviceMemory m_TextureImageMemory;
 
 	uint16_t m_CurrentFrame = 0;
 	bool m_FramebufferResized = false;
