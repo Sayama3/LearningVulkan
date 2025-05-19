@@ -218,8 +218,11 @@ private:
 		createFramebuffers();
 
 		createCommandPool();
+
 		createTextureImage();
 		createTextureImageView();
+		createTextureSampler();
+
 		createVertexBuffer();
 		createIndexBuffer();
 
@@ -271,6 +274,7 @@ private:
 		}
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
+		deviceFeatures.samplerAnisotropy = VK_TRUE;
 
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -672,6 +676,48 @@ private:
 		m_TextureImageView = createImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB);
 	}
 
+	void createTextureSampler() {
+		VkSamplerCreateInfo samplerInfo{};
+		samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+
+		// VK_FILTER_NEAREST or VK_FILTER_LINEAR
+		samplerInfo.magFilter = VK_FILTER_LINEAR;
+		samplerInfo.minFilter = VK_FILTER_LINEAR;
+
+		// VK_SAMPLER_ADDRESS_MODE_REPEAT or VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT or VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE or VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE or VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+		VkPhysicalDeviceFeatures supportedFeatures;
+		vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
+		// TODO? Get the samplerAnisotropy boolean at the beginning
+		if (supportedFeatures.samplerAnisotropy) {
+			samplerInfo.anisotropyEnable = VK_TRUE;
+			VkPhysicalDeviceProperties properties{};
+			vkGetPhysicalDeviceProperties(m_PhysicalDevice, &properties);
+			samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+		} else {
+			samplerInfo.anisotropyEnable = VK_FALSE;
+			samplerInfo.maxAnisotropy = 1.0f;
+		}
+
+		samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+		samplerInfo.unnormalizedCoordinates = VK_FALSE; // We probably will always prefer going 0-1 rather than 0-Width/Height
+
+		samplerInfo.compareEnable = VK_FALSE;
+		samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+
+		// TODO: Add mip maps.
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		samplerInfo.mipLodBias = 0.0f;
+		samplerInfo.minLod = 0.0f;
+		samplerInfo.maxLod = 0.0f;
+
+
+		TRY_VK(vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_TextureSampler));
+	}
+
 	void createVertexBuffer() {
 		/* It should be noted that in a real world application,
 		 * you're not supposed to actually call vkAllocateMemory for every individual buffer.
@@ -848,6 +894,7 @@ private:
 	void cleanup() {
 		cleanupSwapChain();
 
+		vkDestroySampler(m_Device, m_TextureSampler, nullptr);
     	vkDestroyImageView(m_Device, m_TextureImageView, nullptr);
 		vkDestroyImage(m_Device, m_TextureImage, nullptr);
 		vkFreeMemory(m_Device, m_TextureImageMemory, nullptr);
@@ -1254,7 +1301,12 @@ private:
 		}
 
 		// Maximum possible size of textures affects graphics quality
-		score += deviceProperties.limits.maxImageDimension2D;
+		score += static_cast<int>(deviceProperties.limits.maxImageDimension2D);
+
+		// Anisotropy Sampler is cool, the more the merrier.
+		if (deviceFeatures.samplerAnisotropy) {
+			score += static_cast<int>(deviceProperties.limits.maxSamplerAnisotropy * 10.0f);
+		}
 
 		// Application can't function without geometry shaders
 		if (!deviceFeatures.geometryShader) {
@@ -1661,6 +1713,7 @@ private:
 	VkImage m_TextureImage{VK_NULL_HANDLE};
 	VkDeviceMemory m_TextureImageMemory{VK_NULL_HANDLE};
 	VkImageView m_TextureImageView{VK_NULL_HANDLE};
+	VkSampler m_TextureSampler{VK_NULL_HANDLE};
 
 	uint16_t m_CurrentFrame = 0;
 	bool m_FramebufferResized = false;
