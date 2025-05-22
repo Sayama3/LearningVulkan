@@ -5,6 +5,8 @@ find_package(Vulkan REQUIRED)
 add_executable(Application
     include/stb_image.h
     src/main.cpp
+		src/Image.cpp
+		include/Image.hpp
 )
 
 target_include_directories(Application PUBLIC include)
