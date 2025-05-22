@@ -19,6 +19,7 @@ target_link_libraries(Application PUBLIC
 	imgui
 	spdlog::spdlog
 	TracyClient
+	assimp::assimp
 )
 
 # Might have to do something with that

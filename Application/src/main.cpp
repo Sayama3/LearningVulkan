@@ -6,9 +6,11 @@
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
 // #define GLM_FORCE_LEFT_HANDED
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 
 #include <algorithm> // Necessary for std::clamp
 #include <array>
@@ -49,9 +51,18 @@
 #define TRY_VK_MSG(vk_action, message) TRY_MSG((vk_action) == VK_SUCCESS, message)
 #define TRY_VK(vk_action) TRY_MSG((vk_action) == VK_SUCCESS, #vk_action)
 
+#include <assimp/Importer.hpp> // C++ importer interface
+#include <assimp/postprocess.h> // Post processing flags
+#include <assimp/scene.h> // Output data structure
+
+#include "../../build/wsl/debug/_deps/assimp-src/include/assimp/cimport.h"
+
 static constexpr uint32_t WIDTH = 800;
 static constexpr uint32_t HEIGHT = 600;
 static constexpr uint16_t MAX_FRAMES_IN_FLIGHT = 2;
+
+static constexpr const char* const MODEL_PATH = "Assets/viking_room.obj";
+static constexpr const char* const TEXTURE_PATH = "Assets/viking_room.png";
 
 static const std::vector<const char *> c_ValidationLayers = {"VK_LAYER_KHRONOS_validation",};
 static const std::vector<const char*> c_DeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -100,23 +111,6 @@ struct UniformBufferObject {
 	glm::mat4 model;
 	glm::mat4 view;
 	glm::mat4 proj;
-};
-
-const std::vector<Vertex> c_Vertices = {
-	{{-0.5f, -0.5f, +0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-	{{+0.5f, -0.5f, +0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-	{{+0.5f, +0.5f, +0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-	{{-0.5f, +0.5f, +0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-
-	{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-	{{+0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-	{{+0.5f, +0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-	{{-0.5f, +0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-};
-
-const std::vector<uint16_t> c_Indices = {
-	0, 1, 2, 2, 3, 0,
-	4, 5, 6, 6, 7, 4,
 };
 
 static std::vector<char> readFile(const std::filesystem::path& filename) {
@@ -241,6 +235,7 @@ private:
 		createTextureImageView();
 		createTextureSampler();
 
+		loadModel();
 		createVertexBuffer();
 		createIndexBuffer();
 
@@ -714,7 +709,7 @@ private:
 		Imagine::Core::Image<uint8_t> image;
 		{
 			int texWidth, texHeight, texChannels;
-			stbi_uc* pixels = stbi_load("Assets/texture.jpg", &texWidth, &texHeight, &texChannels, 4);
+			stbi_uc* pixels = stbi_load(TEXTURE_PATH, &texWidth, &texHeight, &texChannels, 4);
 			image.Set(std::move(pixels), texWidth, texHeight, 4);
 		}
 
@@ -794,6 +789,95 @@ private:
 		TRY_VK(vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_TextureSampler));
 	}
 
+	bool loadModel() {
+		// Create an instance of the Importer class
+		Assimp::Importer importer;
+
+		// And have it read the given file with some example postprocessing
+		// Usually - if speed is not the most important aspect for you - you'll
+		// probably to request more postprocessing than we do in this example.
+		const aiScene* scene = importer.ReadFile( MODEL_PATH,
+			aiProcess_Triangulate |
+			aiProcess_JoinIdenticalVertices |
+			aiProcess_GenUVCoords |
+			aiProcess_FlipUVs |
+			aiProcess_SortByPType
+			);
+
+		// If the import failed, report it
+		if (nullptr == scene) {
+			std::cerr << importer.GetErrorString() << std::endl;
+			return false;
+		}
+
+		// Now we can access the file's contents.
+
+		std::vector<const aiNode*> nodes{scene->mRootNode};
+
+		m_Vertices.clear();
+		m_Vertices.reserve(9000);
+
+		m_Indices.clear();
+		m_Indices.reserve(3000);
+
+		// TODO: Optimize the loading by loading the vertices first and then adding only the indices for everytime I encounter those by storing the offset related to the mesh stored.
+
+		while (!nodes.empty()) {
+			const aiNode& node = *nodes.back();
+			nodes.pop_back();
+
+			const aiMatrix4x4 transform = node.mTransformation;
+			for (int meshIndex = 0; meshIndex < node.mNumMeshes; ++meshIndex) {
+				const aiMesh& mesh = *scene->mMeshes[node.mMeshes[meshIndex]];
+				if (mesh.mPrimitiveTypes != aiPrimitiveType_TRIANGLE) {
+					continue;
+				}
+				if (!mesh.HasPositions()) {
+					continue;
+				}
+				const uint32_t offsetIndices = m_Vertices.size();
+
+				for (uint32_t vertexIndex = 0u; vertexIndex < mesh.mNumVertices; ++vertexIndex) {
+					Vertex vertex{
+					{0,0,0},
+					{1,1,1},
+					{0,0},
+					};
+
+					aiVector3D pos = transform * mesh.mVertices[vertexIndex];
+					vertex.pos = {pos.x, pos.y, pos.z};
+
+					if (mesh.HasVertexColors(0)) {
+						aiColor4D texCoord = mesh.mColors[0][vertexIndex];
+						vertex.color = {texCoord.r, texCoord.g, texCoord.b};
+					}
+
+					if (mesh.HasTextureCoords(0)) {
+						aiVector3D texCoord = mesh.mTextureCoords[0][vertexIndex];
+						vertex.texCoord = {texCoord.x, texCoord.y};
+					}
+
+					m_Vertices.push_back(vertex);
+				}
+
+				for (int faceIndex = 0; faceIndex < mesh.mNumFaces; ++faceIndex) {
+					const aiFace& face = mesh.mFaces[faceIndex];
+					TRY(face.mNumIndices == 3);
+					m_Indices.push_back(offsetIndices + face.mIndices[0]);
+					m_Indices.push_back(offsetIndices + face.mIndices[1]);
+					m_Indices.push_back(offsetIndices + face.mIndices[2]);
+				}
+			}
+
+			for (int i = 0; i < node.mNumChildren; ++i) {
+				nodes.push_back(node.mChildren[i]);
+			}
+		}
+
+		// We're done. Everything will be cleaned up by the importer destructor
+		return true;
+	}
+
 	void createVertexBuffer() {
 		/* It should be noted that in a real world application,
 		 * you're not supposed to actually call vkAllocateMemory for every individual buffer.
@@ -804,7 +888,7 @@ private:
 		 * You can either implement such an allocator yourself, or use the [VulkanMemoryAllocator library](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) provided by the GPUOpen initiative.
 		 * However, for this tutorial, it's okay to use a separate allocation for every resource, because we won't come close to hitting any of these limits for now.
 		 */
-		const VkDeviceSize bufferSize = sizeof(Vertex) * c_Vertices.size();
+		const VkDeviceSize bufferSize = sizeof(Vertex) * m_Vertices.size();
 
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
@@ -816,7 +900,7 @@ private:
 		//  (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ensure the data will be visible by vulkan instantly).
 		void* data{nullptr}; // some pointer
 		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); // Binding the variable to the CPU memory vulkan can read
-		memcpy(data, c_Vertices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
+		memcpy(data, m_Vertices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
 		vkUnmapMemory(m_Device, stagingBufferMemory); // Unmap the variable. Technically will map to nowhere.
 		data = nullptr; // Just my little security to avoid segfault.
 
@@ -827,6 +911,7 @@ private:
 		vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
 		vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
 	}
+
 	void createIndexBuffer() {
 		/* It should be noted that in a real world application,
 		 * you're not supposed to actually call vkAllocateMemory for every individual buffer.
@@ -837,7 +922,7 @@ private:
 		 * You can either implement such an allocator yourself, or use the [VulkanMemoryAllocator library](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) provided by the GPUOpen initiative.
 		 * However, for this tutorial, it's okay to use a separate allocation for every resource, because we won't come close to hitting any of these limits for now.
 		 */
-		const VkDeviceSize bufferSize = sizeof(uint16_t) * c_Indices.size();
+		const VkDeviceSize bufferSize = sizeof(uint32_t) * m_Indices.size();
 
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
@@ -849,7 +934,7 @@ private:
 		//  (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ensure the data will be visible by vulkan instantly).
 		void* data{nullptr}; // some pointer
 		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); // Binding the variable to the CPU memory vulkan can read
-		memcpy(data, c_Indices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
+		memcpy(data, m_Indices.data(), (size_t) bufferSize); // Copy the data for vulkan to use
 		vkUnmapMemory(m_Device, stagingBufferMemory); // Unmap the variable. Technically will map to nowhere.
 		data = nullptr; // Just my little security to avoid segfault.
 
@@ -1800,14 +1885,14 @@ private:
 		VkBuffer vertexBuffers[] = {m_VertexBuffer};
 		VkDeviceSize offsets[] = {0};
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(commandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdBindIndexBuffer(commandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT32); // TODO: Set the type depending on what the type of the index buffer is.
 
 		// Binding Uniforms
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[m_CurrentFrame], 0, nullptr);
 
 		// Drawing the vertices.
 		// vkCmdDraw(commandBuffer, static_cast<uint32_t>(c_Vertices.size()), 1, 0, 0);
-		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(c_Indices.size()), 1, 0, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_Indices.size()), 1, 0, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
 		TRY_VK(vkEndCommandBuffer(commandBuffer));
@@ -1848,6 +1933,9 @@ private:
 	VkPipelineLayout m_PipelineLayout{VK_NULL_HANDLE};
 	VkPipeline m_GraphicsPipeline{VK_NULL_HANDLE};
 	VkCommandPool m_CommandPool{VK_NULL_HANDLE};
+
+	std::vector<Vertex> m_Vertices;
+	std::vector<uint32_t> m_Indices;
 
 	VkBuffer m_VertexBuffer{VK_NULL_HANDLE};
 	VkDeviceMemory m_VertexBufferMemory{VK_NULL_HANDLE};

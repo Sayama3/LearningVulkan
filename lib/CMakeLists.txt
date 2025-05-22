@@ -24,6 +24,17 @@ FetchContent_Declare(
         GIT_TAG "1.0.1"
 )
 
+set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF)
+set(ASSIMP_BUILD_TESTS OFF)
+set(ASSIMP_INSTALL OFF)
+set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
+set(BUILD_SHARED_LIBS OFF)
+FetchContent_Declare(
+        Assimp
+        GIT_REPOSITORY "https://github.com/assimp/assimp.git"
+        GIT_TAG "v5.4.3"
+)
+
 set(IMGUI_GLFW ON)
 set(IMGUI_VULKAN ON)
 set(IMGUI_GLFW ON)
@@ -53,7 +64,7 @@ FetchContent_Declare(
         GIT_PROGRESS TRUE
 )
 
-FetchContent_MakeAvailable(GLFW glm ImGui Spdlog Tracy)
+FetchContent_MakeAvailable(GLFW glm ImGui Spdlog Tracy Assimp)
 find_package(Vulkan REQUIRED)
 
 # Need to say to imgui where is glfw & Vulkan Headers
