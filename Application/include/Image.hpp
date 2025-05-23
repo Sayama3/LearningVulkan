@@ -43,6 +43,7 @@ namespace Imagine::Core {
 			m_Width = new_width;
 			m_Channels = new_channels;
 			m_Pixels = pixels;
+			pixels = nullptr;
 		}
 
 		void Clear() {
