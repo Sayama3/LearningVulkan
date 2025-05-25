@@ -1584,14 +1584,14 @@ private:
 			throw std::runtime_error("failed to begin recording command buffer!");
 		}
 
-		...
+		// ...
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSets[i], 0, 0);
 
 		vkCmdDispatch(computeCommandBuffer, PARTICLE_COUNT / 256, 1, 1);
 
-		...
+		// ...
 
 		if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
 			throw std::runtime_error("failed to record command buffer!");
